@@ -4,195 +4,203 @@
 #include "../include/AudioSource.h"
 #include <iostream>
 #include <cmath>
-#include <algorithm>
+#include <vector>
+#include <cstdlib>
+#include <ctime>
 
 const float PI = 3.14159265358979323846f;
 
+// CẤU TRÚC HẠT (PARTICLE) CHO HIỆU ỨNG LẤP LÁNH
+struct Particle {
+    sf::CircleShape shape;
+    sf::Vector2f velocity;
+    float lifetime;
+    float initialLifetime;
+};
+
 int main() {
-    // 1. KHỞI TẠO ÂM THANH
+    std::srand(static_cast<unsigned int>(std::time(nullptr)));
+
     AudioEngine engine;
     engine.Init();
     engine.SetDopplerFactor(1.0f);
 
     AudioSource sound;
-    if (!sound.LoadWav("siren.wav")) {
-        std::cerr << "Lỗi: Không tìm thấy file siren.wav!" << std::endl;
-        return -1;
-    }
+    if (!sound.LoadWav("siren.wav")) return -1;
     sound.SetLooping(false);
     AudioListener::SetPosition(0.0f, 0.0f, 0.0f);
 
-    // 2. KHỞI TẠO ĐỒ HỌA (FULLSCREEN)
     sf::VideoMode desktop = sf::VideoMode::getDesktopMode();
-    sf::RenderWindow window(desktop, "HUST 3D Audio Paths", sf::Style::Fullscreen);
+    sf::RenderWindow window(desktop, "HUST 3D Audio & Particle Trail", sf::Style::Fullscreen);
     window.setFramerateLimit(60);
 
     float screenW = desktop.width;
     float screenH = desktop.height;
-    float margin = 100.0f; // Lề an toàn để hình không bao giờ tràn màn hình
+    float fov = 600.0f;
 
-    // --- CHUẨN BỊ 8 HÌNH DÁNG VÀ MÀU SẮC KHÁC NHAU ---
-    sf::RectangleShape shape1(sf::Vector2f(120, 40));     // 1. Chữ nhật ngang
-    sf::CircleShape shape2(50);                           // 2. Hình tròn
-    sf::CircleShape shape3(55, 3);                        // 3. Hình tam giác
-    sf::CircleShape shape4(55, 5);                        // 4. Hình ngũ giác
-    sf::RectangleShape shape5(sf::Vector2f(40, 120));     // 5. Chữ nhật dọc
-    sf::CircleShape shape6(55, 6);                        // 6. Hình lục giác
-    sf::CircleShape shape7(60, 4);                        // 7. Hình thoi (vuông nghiêng)
-    sf::CircleShape shape8(60, 8);                        // 8. Hình bát giác
+    sf::RectangleShape shape1(sf::Vector2f(100, 100)); 
+    sf::CircleShape shape2(60);                        
+    sf::CircleShape shape3(70, 3);                     
+    sf::CircleShape shape4(70, 5);                     
+    sf::RectangleShape shape5(sf::Vector2f(50, 150));  
+    sf::CircleShape shape6(70, 6);                     
+    sf::CircleShape shape7(80, 4);                     
+    sf::CircleShape shape8(80, 8);                     
 
     sf::Shape* shapes[8] = { &shape1, &shape2, &shape3, &shape4, &shape5, &shape6, &shape7, &shape8 };
     sf::Color colors[8] = {
         sf::Color::Cyan, sf::Color::Red, sf::Color::Green, sf::Color::Yellow,
         sf::Color::Magenta, sf::Color::White, sf::Color(255, 165, 0), sf::Color(100, 150, 255)
     };
-    std::string pathNames[8] = {
-        "Trai -> Phai", "Phai -> Trai", "Cheo Len (Trai duoi -> Phai tren)", "Cheo Xuong (Trai tren -> Phai duoi)",
-        "Tren -> Duoi", "Duoi -> Tren", "Quỹ đạo Tròn (Circle)", "Quỹ đạo Vuông (Square)"
-    };
-
-    // Đặt tâm (Origin) của tất cả các hình vào chính giữa để vẽ chính xác
+    
     for (int i = 0; i < 8; ++i) {
         shapes[i]->setFillColor(colors[i]);
         sf::FloatRect bounds = shapes[i]->getLocalBounds();
         shapes[i]->setOrigin(bounds.left + bounds.width / 2.0f, bounds.top + bounds.height / 2.0f);
     }
 
-    // 3. BIẾN TRẠNG THÁI TRÒ CHƠI
+    // Danh sách chứa các hạt lấp lánh đang hiển thị
+    std::vector<Particle> trailParticles;
+
     int spacePressCount = 0;
     bool isMoving = false;
-    int currentPattern = 0; // 0 đến 7
-
+    int currentPattern = 0;
     float elapsedTime = 0.0f;
-    float travelTime = 2.0f; // Sẽ thay đổi tùy độ dài quỹ đạo
-    
-    // Lưu tọa độ ảo khung hình trước để tính Đạo Hàm Vận Tốc (Doppler)
-    float prevVirtualX = 0.0f;
-    float prevVirtualY = 0.0f;
+    float travelTime = 5.0f; // ĐÃ TĂNG LÊN ĐỂ BAY CHẬM HƠN
+
+    float prevAlX = 0, prevAlY = 0, prevAlZ = 0;
     bool firstFrame = true;
 
     sf::Clock clock;
 
-    std::cout << "=========================================" << std::endl;
-    std::cout << "[GAME] KICH HOAT CHUOI QUY DAO 8 HUONG!" << std::endl;
-    std::cout << "[GAME] Nhan SPACE de ban (10 lan). Nhan ESC de thoat." << std::endl;
-    std::cout << "=========================================" << std::endl;
-
-    // 4. VÒNG LẶP GAME
     while (window.isOpen()) {
         float deltaTime = clock.restart().asSeconds();
         sf::Event event;
 
-        // XỬ LÝ INPUT
         while (window.pollEvent(event)) {
-            if (event.type == sf::Event::Closed) window.close();
-            if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Escape) window.close();
+            if (event.type == sf::Event::Closed || 
+               (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Escape)) 
+                window.close();
             
             if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Space) {
                 if (!isMoving && spacePressCount < 10) {
                     spacePressCount++;
-                    // Pattern từ 0 đến 7. Nếu lượt 9, 10 thì quay vòng lại pattern đầu
                     currentPattern = (spacePressCount - 1) % 8; 
-                    
                     isMoving = true;
                     elapsedTime = 0.0f;
-                    firstFrame = true; // Báo hiệu frame đầu tiên của quỹ đạo mới
+                    firstFrame = true;
+                    trailParticles.clear(); // Xóa vết cũ khi bắn hạt mới
 
-                    // Thời gian bay: Các hình lượn vòng dài hơn cần nhiều thời gian hơn
-                    if (currentPattern >= 6) travelTime = 4.0f; 
-                    else travelTime = 2.0f; 
+                    // Các quỹ đạo vòng lượn sẽ bay chậm hơn nữa (7 giây)
+                    if (currentPattern == 3 || currentPattern == 5 || currentPattern == 7) travelTime = 7.0f;
+                    else travelTime = 5.0f;
 
                     sound.Play();
-                    std::cout << "[BAM] Lan " << spacePressCount << " | Kieu: " << pathNames[currentPattern] << std::endl;
-                } else if (spacePressCount == 10) {
-                    std::cout << "[THONG BAO] Da xong 10 luot! Nhan ESC de thoat." << std::endl;
-                    spacePressCount++;
                 }
             }
         }
 
-        // CẬP NHẬT LOGIC KHÔNG GIAN (UPDATE)
+        window.clear(sf::Color::Black);
+
         if (isMoving) {
             elapsedTime += deltaTime;
-            float ratio = elapsedTime / travelTime;
-            if (ratio >= 1.0f) {
-                ratio = 1.0f;
-                isMoving = false;
+            float t = elapsedTime / travelTime;
+            if (t >= 1.0f) { t = 1.0f; isMoving = false; }
+
+            float curX = 0.0f, curY = 0.0f, curZ = 0.0f;
+            float angle = t * 2.0f * PI;
+
+            // QUỸ ĐẠO
+            switch (currentPattern) {
+                case 0: curX = -20.0f + (t * 40.0f); curY = 0.0f; curZ = 5.0f; break;
+                case 1: curX = 0.0f; curY = 0.0f; curZ = 50.0f - (t * 65.0f); break;
+                case 2: curX = 20.0f - (t * 40.0f); curY = 10.0f - (t * 20.0f); curZ = 40.0f - (t * 38.0f); break;
+                case 3: curX = 15.0f * std::sin(angle); curY = 0.0f; curZ = 15.0f * std::cos(angle); break;
+                case 4: curX = 0.0f; curY = 20.0f - (t * 40.0f); curZ = 30.0f - (t * 25.0f); break;
+                case 5: curX = 0.0f; curY = 15.0f * std::sin(angle); curZ = 15.0f * std::cos(angle); break;
+                case 6: curX = 10.0f * std::sin(t * 4.0f * PI); curY = 0.0f; curZ = 40.0f - (t * 35.0f); break;
+                case 7: curX = 10.0f * std::sin(angle * 2.0f); curZ = 10.0f * std::cos(angle * 2.0f); curY = 15.0f - (t * 30.0f); break;
             }
 
-            float curX = 0.0f, curY = 0.0f;
+            if (std::abs(curZ) < 0.1f) curZ = 0.1f * (curZ < 0 ? -1 : 1);
 
-            // KIỂM SOÁT 8 QUỸ ĐẠO DỰA VÀO RATIO (0.0 -> 1.0)
-            if (currentPattern == 0) { // L -> R
-                curX = margin + ratio * (screenW - 2 * margin);
-                curY = screenH / 2.0f;
-            } else if (currentPattern == 1) { // R -> L
-                curX = (screenW - margin) - ratio * (screenW - 2 * margin);
-                curY = screenH / 2.0f;
-            } else if (currentPattern == 2) { // Chéo Lên
-                curX = margin + ratio * (screenW - 2 * margin);
-                curY = (screenH - margin) - ratio * (screenH - 2 * margin);
-            } else if (currentPattern == 3) { // Chéo Xuống
-                curX = margin + ratio * (screenW - 2 * margin);
-                curY = margin + ratio * (screenH - 2 * margin);
-            } else if (currentPattern == 4) { // Trên -> Dưới
-                curX = screenW / 2.0f;
-                curY = margin + ratio * (screenH - 2 * margin);
-            } else if (currentPattern == 5) { // Dưới -> Trên
-                curX = screenW / 2.0f;
-                curY = (screenH - margin) - ratio * (screenH - 2 * margin);
-            } else if (currentPattern == 6) { // Tròn (Circle)
-                float angle = ratio * 2.0f * PI; // Quay đủ 360 độ
-                float R = std::min(screenW, screenH) / 2.0f - margin;
-                curX = screenW / 2.0f + R * std::cos(angle);
-                curY = screenH / 2.0f + R * std::sin(angle);
-            } else if (currentPattern == 7) { // Vuông (Square)
-                float seg = ratio * 4.0f; // 4 cạnh của hình vuông
-                float R = std::min(screenW, screenH) / 2.0f - margin;
-                float left = screenW/2 - R, right = screenW/2 + R;
-                float top = screenH/2 - R, bot = screenH/2 + R;
+            // ÂM THANH
+            float alX = curX, alY = curY, alZ = -curZ; 
+            if (firstFrame) { prevAlX = alX; prevAlY = alY; prevAlZ = alZ; firstFrame = false; }
 
-                if (seg < 1.0f) { curX = left + seg * (right - left); curY = top; }
-                else if (seg < 2.0f) { curX = right; curY = top + (seg - 1.0f) * (bot - top); }
-                else if (seg < 3.0f) { curX = right - (seg - 2.0f) * (right - left); curY = bot; }
-                else { curX = left; curY = bot - (seg - 3.0f) * (bot - top); }
+            float vX = 0, vY = 0, vZ = 0;
+            if (deltaTime > 0) {
+                vX = (alX - prevAlX) / deltaTime;
+                vY = (alY - prevAlY) / deltaTime;
+                vZ = (alZ - prevAlZ) / deltaTime;
             }
 
-            // --- ĐỒNG BỘ ÂM THANH 3D VÀ ĐẠO HÀM VẬN TỐC ---
-            // Ánh xạ X, Y của màn hình sang hệ trục OpenAL: X(-20 tới 20), Y(10 tới -10)
-            float virtualX = ((curX / screenW) - 0.5f) * 40.0f;
-            float virtualY = (0.5f - (curY / screenH)) * 20.0f; 
+            sound.SetPosition(alX, alY, alZ);
+            sound.SetVelocity(vX, vY, vZ);
+            prevAlX = alX; prevAlY = alY; prevAlZ = alZ;
 
-            if (firstFrame) {
-                prevVirtualX = virtualX;
-                prevVirtualY = virtualY;
-                firstFrame = false;
+            // ĐỒ HỌA & HIỆU ỨNG HẠT
+            if (curZ > 0.0f) {
+                float screenX = screenW / 2.0f + (curX / curZ) * fov;
+                float screenY = screenH / 2.0f - (curY / curZ) * fov;
+                float baseScale = 5.0f / curZ; 
+                
+                // 1. SINH RA HẠT MỚI (Tạo vệt lấp lánh)
+                // Sinh ra 3 hạt mỗi frame
+                for(int i = 0; i < 3; i++) {
+                    Particle p;
+                    // Kích thước hạt ngẫu nhiên, to nhỏ tùy khoảng cách Z
+                    p.shape.setRadius(((std::rand() % 5) + 2) * baseScale); 
+                    p.shape.setOrigin(p.shape.getRadius(), p.shape.getRadius());
+                    
+                    // Vị trí hạt mọc ra xung quanh vật thể chính
+                    float offsetX = (std::rand() % 40 - 20) * baseScale;
+                    float offsetY = (std::rand() % 40 - 20) * baseScale;
+                    p.shape.setPosition(screenX + offsetX, screenY + offsetY);
+                    
+                    // Thỉnh thoảng có hạt màu trắng lóe sáng
+                    sf::Color pColor = colors[currentPattern];
+                    if (std::rand() % 4 == 0) pColor = sf::Color::White;
+                    p.shape.setFillColor(pColor);
+                    
+                    // Bay tản ra xung quanh nhẹ nhàng
+                    p.velocity = sf::Vector2f((std::rand() % 100 - 50) / 10.0f, (std::rand() % 100 - 50) / 10.0f);
+                    p.initialLifetime = 0.5f + (std::rand() % 50) / 100.0f; // Sống từ 0.5 đến 1.0 giây
+                    p.lifetime = p.initialLifetime;
+                    
+                    trailParticles.push_back(p);
+                }
+
+                // 2. CẬP NHẬT VỊ TRÍ HÌNH CHÍNH
+                shapes[currentPattern]->setPosition(screenX, screenY);
+                shapes[currentPattern]->setScale(baseScale, baseScale);
             }
-
-            // Tính đạo hàm: V = ds/dt
-            float vX = 0.0f, vY = 0.0f;
-            if (deltaTime > 0.0f) {
-                vX = (virtualX - prevVirtualX) / deltaTime;
-                vY = (virtualY - prevVirtualY) / deltaTime;
-            }
-
-            // Cập nhật lên Audio Engine
-            sound.SetPosition(virtualX, virtualY, 0.0f);
-            sound.SetVelocity(vX, vY, 0.0f);
-
-            // Cập nhật đồ họa
-            shapes[currentPattern]->setPosition(curX, curY);
-
-            // Lưu tọa độ cho frame sau
-            prevVirtualX = virtualX;
-            prevVirtualY = virtualY;
         }
 
-        // VẼ HÌNH LÊN MÀN HÌNH (RENDER)
-        window.clear(sf::Color::Black);
-        if (isMoving) {
+        // 3. CẬP NHẬT VÀ VẼ HẠT LẤP LÁNH
+        for (auto it = trailParticles.begin(); it != trailParticles.end(); ) {
+            it->lifetime -= deltaTime;
+            if (it->lifetime <= 0) {
+                it = trailParticles.erase(it); // Xóa hạt đã hết vòng đời
+            } else {
+                // Di chuyển hạt
+                it->shape.move(it->velocity * deltaTime * 60.0f);
+                
+                // Fade out (mờ dần theo thời gian)
+                sf::Color c = it->shape.getFillColor();
+                c.a = static_cast<sf::Uint8>((it->lifetime / it->initialLifetime) * 255);
+                it->shape.setFillColor(c);
+                
+                window.draw(it->shape);
+                ++it;
+            }
+        }
+
+        // Vẽ vật thể chính đè lên trên lớp hạt
+        if (isMoving && prevAlZ < 0.0f) { // prevAlZ < 0 nghĩa là curZ > 0 (trước mặt)
             window.draw(*shapes[currentPattern]);
         }
+
         window.display();
     }
 
