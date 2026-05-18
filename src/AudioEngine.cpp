@@ -1,39 +1,143 @@
-#include "../include/AudioEngine.h"
-#include <AL/alext.h> // Thư viện chứa các extension như HRTF
+#include "AudioEngine.h"
 
-AudioEngine::AudioEngine() : device(nullptr), context(nullptr) {}
+#include <iostream>
 
-void AudioEngine::Init() {
-    device = alcOpenDevice(nullptr);
-    if (!device) {
-        std::cerr << "[AudioSDK] Lỗi: Không thể mở thiết bị!" << std::endl;
-        return;
-    }
+AudioEngine::AudioEngine()
+    : device(nullptr),
+      context(nullptr),
+      initialized(false),
+      hrtfEnabled(false) {}
 
-    // Yêu cầu OpenAL Soft kích hoạt bộ lọc HRTF
-    ALCint attrs[] = { ALC_HRTF_SOFT, ALC_TRUE, 0 };
-    context = alcCreateContext(device, attrs);
-    alcMakeContextCurrent(context);
-
-    // Kiểm tra xem hệ thống đã bật HRTF thành công chưa
-    ALCint hrtf_state;
-    alcGetIntegerv(device, ALC_HRTF_SOFT, 1, &hrtf_state);
-    if (hrtf_state) {
-        std::cout << ">>> [AUDIO ENGINE] HRTF KICH HOAT: San sang cho khong gian 360 do! <<<" << std::endl;
-    } else {
-        std::cout << "[AUDIO ENGINE] Canh bao: He thong khong the bat HRTF." << std::endl;
-    }
-
-    alDistanceModel(AL_INVERSE_DISTANCE_CLAMPED);
+AudioEngine::~AudioEngine()
+{
+    Shutdown();
 }
 
-void AudioEngine::SetDopplerFactor(float factor, float velocityOfSound) {
+bool AudioEngine::Init(bool enableHRTF)
+{
+    device = alcOpenDevice(nullptr);
+
+    if (!device)
+    {
+        std::cerr << "[AudioEngine] Failed to open default audio device." << std::endl;
+        return false;
+    }
+
+    if (enableHRTF)
+    {
+        ALCint attrs[] = {
+            ALC_HRTF_SOFT, ALC_TRUE,
+            0};
+
+        context = alcCreateContext(device, attrs);
+    }
+    else
+    {
+        context = alcCreateContext(device, nullptr);
+    }
+
+    if (!context)
+    {
+        std::cerr << "[AudioEngine] Failed to create OpenAL context." << std::endl;
+        alcCloseDevice(device);
+        device = nullptr;
+        return false;
+    }
+
+    if (!alcMakeContextCurrent(context))
+    {
+        std::cerr << "[AudioEngine] Failed to make OpenAL context current." << std::endl;
+        alcDestroyContext(context);
+        alcCloseDevice(device);
+
+        context = nullptr;
+        device = nullptr;
+
+        return false;
+    }
+
+    initialized = true;
+
+    ALCint hrtfState = ALC_FALSE;
+    alcGetIntegerv(device, ALC_HRTF_SOFT, 1, &hrtfState);
+
+    hrtfEnabled = (hrtfState == ALC_TRUE);
+
+    if (hrtfEnabled)
+    {
+        std::cout << "[AudioEngine] HRTF enabled." << std::endl;
+        std::cout << "[AudioEngine] Use headphones for 360-degree spatial audio." << std::endl;
+    }
+    else
+    {
+        std::cout << "[AudioEngine] Warning: HRTF is not enabled or not supported." << std::endl;
+    }
+
+    SetDistanceModel(AL_INVERSE_DISTANCE_CLAMPED);
+    SetDopplerFactor(1.0f, 343.3f);
+
+    CheckALError("AudioEngine::Init");
+
+    return true;
+}
+
+void AudioEngine::Shutdown()
+{
+    if (context)
+    {
+        alcMakeContextCurrent(nullptr);
+        alcDestroyContext(context);
+        context = nullptr;
+    }
+
+    if (device)
+    {
+        alcCloseDevice(device);
+        device = nullptr;
+    }
+
+    initialized = false;
+    hrtfEnabled = false;
+}
+
+bool AudioEngine::IsInitialized() const
+{
+    return initialized;
+}
+
+bool AudioEngine::IsHRTFEnabled() const
+{
+    return hrtfEnabled;
+}
+
+void AudioEngine::SetDistanceModel(ALenum model)
+{
+    alDistanceModel(model);
+    CheckALError("AudioEngine::SetDistanceModel");
+}
+
+void AudioEngine::SetDopplerFactor(float factor, float velocityOfSound)
+{
     alDopplerFactor(factor);
     alSpeedOfSound(velocityOfSound);
+
+    CheckALError("AudioEngine::SetDopplerFactor");
 }
 
-AudioEngine::~AudioEngine() {
-    alcMakeContextCurrent(nullptr);
-    if (context) alcDestroyContext(context);
-    if (device) alcCloseDevice(device);
+bool AudioEngine::CheckALError(const char *operation)
+{
+    ALenum error = alGetError();
+
+    if (error != AL_NO_ERROR)
+    {
+        std::cerr << "[OpenAL Error] "
+                  << operation
+                  << " failed. Error code: "
+                  << error
+                  << std::endl;
+
+        return false;
+    }
+
+    return true;
 }

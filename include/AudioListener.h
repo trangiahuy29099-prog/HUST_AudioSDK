@@ -1,8 +1,16 @@
 #pragma once
+
 #include <AL/al.h>
 
-class AudioListener {
+#include "Vector3.h"
+
+class AudioListener
+{
 public:
-    static void SetPosition(float x, float y, float z) { alListener3f(AL_POSITION, x, y, z); }
-    static void SetVelocity(float vx, float vy, float vz) { alListener3f(AL_VELOCITY, vx, vy, vz); }
+    static void SetPosition(const Vector3 &position);
+    static void SetVelocity(const Vector3 &velocity);
+    static void SetOrientation(const Vector3 &forward, const Vector3 &up);
+
+    static void SetPosition(float x, float y, float z);
+    static void SetVelocity(float x, float y, float z);
 };
