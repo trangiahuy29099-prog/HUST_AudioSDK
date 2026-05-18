@@ -1,2 +1,20 @@
+# Build output
+*.exe
+*.o
+*.obj
+*.a
+*.lib
+*.dll
 build/
-.cache/
+bin/
+out/
+
+# VS Code
+.vscode/
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Audio temp files
+*.tmp
