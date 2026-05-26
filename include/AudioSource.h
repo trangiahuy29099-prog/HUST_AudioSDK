@@ -3,6 +3,7 @@
 #include <AL/al.h>
 
 #include <string>
+#include <cstddef>
 
 #include "Vector3.h"
 
@@ -25,6 +26,7 @@ public:
     AudioSource &operator=(const AudioSource &) = delete;
 
     bool LoadWav(const std::string &filepath);
+    bool LoadWavFromMemory(const unsigned char *data, std::size_t dataSize);
 
     void Play();
     void Pause();

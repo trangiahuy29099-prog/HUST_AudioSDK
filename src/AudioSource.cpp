@@ -6,10 +6,160 @@
 #include <AL/efx.h>
 
 #include <algorithm>
+#include <fstream>
 #include <iostream>
+#include <limits>
+#include <vector>
 
 #define DR_WAV_IMPLEMENTATION
 #include "dr_wav.h"
+
+namespace
+{
+    std::string ReplaceAll(std::string value, char from, char to)
+    {
+        std::replace(value.begin(), value.end(), from, to);
+        return value;
+    }
+
+    std::string GetBaseName(const std::string &path)
+    {
+        std::size_t pos = path.find_last_of("/\\");
+        if (pos == std::string::npos)
+        {
+            return path;
+        }
+
+        return path.substr(pos + 1);
+    }
+
+    bool UploadPcm16ToOpenAL(
+        ALuint sourceId,
+        ALuint bufferId,
+        const drwav_int16 *pSampleData,
+        unsigned int channels,
+        unsigned int sampleRate,
+        drwav_uint64 totalPCMFrameCount,
+        const std::string &debugName)
+    {
+        if (pSampleData == nullptr || totalPCMFrameCount == 0 || sampleRate == 0)
+        {
+            std::cerr << "[AudioSource] Invalid WAV data: " << debugName << std::endl;
+            return false;
+        }
+
+        ALenum format = 0;
+
+        if (channels == 1)
+        {
+            format = AL_FORMAT_MONO16;
+        }
+        else if (channels == 2)
+        {
+            format = AL_FORMAT_STEREO16;
+
+            std::cout << "[AudioSource] Warning: stereo WAV loaded. "
+                      << "For clear 3D spatial audio and HRTF, use a mono WAV file."
+                      << std::endl;
+        }
+        else
+        {
+            std::cerr << "[AudioSource] Unsupported channel count: "
+                      << channels
+                      << " for "
+                      << debugName
+                      << std::endl;
+            return false;
+        }
+
+        const drwav_uint64 totalSampleCount =
+            totalPCMFrameCount * static_cast<drwav_uint64>(channels);
+
+        const drwav_uint64 byteCount =
+            totalSampleCount * static_cast<drwav_uint64>(sizeof(drwav_int16));
+
+        if (byteCount > static_cast<drwav_uint64>(std::numeric_limits<ALsizei>::max()))
+        {
+            std::cerr << "[AudioSource] WAV file is too large for OpenAL buffer: "
+                      << debugName
+                      << std::endl;
+            return false;
+        }
+
+        // Clear old OpenAL errors before uploading the new buffer.
+        while (alGetError() != AL_NO_ERROR)
+        {
+        }
+
+        // Detach old buffer before overwriting the buffer data.
+        alSourceStop(sourceId);
+        alSourcei(sourceId, AL_BUFFER, 0);
+
+        alBufferData(
+            bufferId,
+            format,
+            pSampleData,
+            static_cast<ALsizei>(byteCount),
+            static_cast<ALsizei>(sampleRate));
+
+        ALenum err = alGetError();
+        if (err != AL_NO_ERROR)
+        {
+            std::cerr << "[AudioSource] Failed to upload WAV data to OpenAL buffer. Error: "
+                      << err
+                      << " | "
+                      << debugName
+                      << std::endl;
+            return false;
+        }
+
+        alSourcei(
+            sourceId,
+            AL_BUFFER,
+            static_cast<ALint>(bufferId));
+
+        err = alGetError();
+        if (err != AL_NO_ERROR)
+        {
+            std::cerr << "[AudioSource] Failed to attach buffer to source. Error: "
+                      << err
+                      << " | "
+                      << debugName
+                      << std::endl;
+            return false;
+        }
+
+        std::cout << "[AudioSource] Loaded WAV: "
+                  << debugName
+                  << " | channels: "
+                  << channels
+                  << " | sample rate: "
+                  << sampleRate
+                  << " | frames: "
+                  << totalPCMFrameCount
+                  << std::endl;
+
+        return true;
+    }
+
+    drwav_int16 *TryReadWavFile(
+        const std::string &candidate,
+        unsigned int &channels,
+        unsigned int &sampleRate,
+        drwav_uint64 &totalPCMFrameCount)
+    {
+        channels = 0;
+        sampleRate = 0;
+        totalPCMFrameCount = 0;
+
+        return drwav_open_file_and_read_pcm_frames_s16(
+            candidate.c_str(),
+            &channels,
+            &sampleRate,
+            &totalPCMFrameCount,
+            nullptr);
+    }
+}
 
 AudioSource::AudioSource()
     : sourceId(0),
@@ -99,12 +249,70 @@ AudioSource::~AudioSource()
 
 bool AudioSource::LoadWav(const std::string &filepath)
 {
+    std::vector<std::string> candidates;
+
+    candidates.push_back(filepath);
+    candidates.push_back(ReplaceAll(filepath, '\\', '/'));
+    candidates.push_back(ReplaceAll(filepath, '/', '\\'));
+
+    const std::string baseName = GetBaseName(filepath);
+    if (!baseName.empty())
+    {
+        candidates.push_back("assets/" + baseName);
+        candidates.push_back("Assets/StreamingAssets/" + baseName);
+        candidates.push_back(baseName);
+    }
+
     unsigned int channels = 0;
     unsigned int sampleRate = 0;
     drwav_uint64 totalPCMFrameCount = 0;
 
-    drwav_int16 *pSampleData = drwav_open_file_and_read_pcm_frames_s16(
-        filepath.c_str(),
+    for (const std::string &candidate : candidates)
+    {
+        drwav_int16 *pSampleData = TryReadWavFile(
+            candidate,
+            channels,
+            sampleRate,
+            totalPCMFrameCount);
+
+        if (pSampleData != nullptr)
+        {
+            bool ok = UploadPcm16ToOpenAL(
+                sourceId,
+                bufferId,
+                pSampleData,
+                channels,
+                sampleRate,
+                totalPCMFrameCount,
+                candidate);
+
+            drwav_free(pSampleData, nullptr);
+            return ok;
+        }
+    }
+
+    std::cerr << "[AudioSource] Failed to load WAV from file path. Tried base path: "
+              << filepath
+              << std::endl;
+
+    return false;
+}
+
+bool AudioSource::LoadWavFromMemory(const unsigned char *data, std::size_t dataSize)
+{
+    if (data == nullptr || dataSize == 0)
+    {
+        std::cerr << "[AudioSource] LoadWavFromMemory received empty data." << std::endl;
+        return false;
+    }
+
+    unsigned int channels = 0;
+    unsigned int sampleRate = 0;
+    drwav_uint64 totalPCMFrameCount = 0;
+
+    drwav_int16 *pSampleData = drwav_open_memory_and_read_pcm_frames_s16(
+        data,
+        dataSize,
         &channels,
         &sampleRate,
         &totalPCMFrameCount,
@@ -112,76 +320,22 @@ bool AudioSource::LoadWav(const std::string &filepath)
 
     if (pSampleData == nullptr)
     {
-        std::cerr << "[AudioSource] Failed to load WAV file: "
-                  << filepath
-                  << std::endl;
-
+        std::cerr << "[AudioSource] Failed to decode WAV from memory." << std::endl;
         return false;
     }
 
-    ALenum format = 0;
-
-    if (channels == 1)
-    {
-        format = AL_FORMAT_MONO16;
-    }
-    else if (channels == 2)
-    {
-        format = AL_FORMAT_STEREO16;
-
-        std::cout << "[AudioSource] Warning: stereo WAV loaded. "
-                  << "For clear 3D spatial audio and HRTF, use a mono WAV file."
-                  << std::endl;
-    }
-    else
-    {
-        std::cerr << "[AudioSource] Unsupported channel count: "
-                  << channels
-                  << std::endl;
-
-        drwav_free(pSampleData, nullptr);
-
-        return false;
-    }
-
-    ALsizei size = static_cast<ALsizei>(
-        totalPCMFrameCount * channels * sizeof(drwav_int16));
-
-    alBufferData(
+    bool ok = UploadPcm16ToOpenAL(
+        sourceId,
         bufferId,
-        format,
         pSampleData,
-        size,
-        static_cast<ALsizei>(sampleRate));
+        channels,
+        sampleRate,
+        totalPCMFrameCount,
+        "Unity memory buffer");
 
     drwav_free(pSampleData, nullptr);
 
-    if (alGetError() != AL_NO_ERROR)
-    {
-        std::cerr << "[AudioSource] Failed to upload WAV data to OpenAL buffer." << std::endl;
-        return false;
-    }
-
-    alSourcei(
-        sourceId,
-        AL_BUFFER,
-        static_cast<ALint>(bufferId));
-
-    if (alGetError() != AL_NO_ERROR)
-    {
-        std::cerr << "[AudioSource] Failed to attach buffer to source." << std::endl;
-        return false;
-    }
-
-    std::cout << "[AudioSource] Loaded WAV: "
-              << filepath
-              << " | channels: "
-              << channels
-              << " | sample rate: "
-              << sampleRate
-              << std::endl;
-
-    return true;
+    return ok;
 }
 
 void AudioSource::Play()

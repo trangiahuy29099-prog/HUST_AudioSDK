@@ -1,20 +1,52 @@
-# Build output
-*.exe
-*.o
-*.obj
-*.a
-*.lib
-*.dll
-build/
-bin/
-out/
+﻿# Unity generated folders
+UnityProject/[Ll]ibrary/
+UnityProject/[Tt]emp/
+UnityProject/[Oo]bj/
+UnityProject/[Bb]uild/
+UnityProject/[Bb]uilds/
+UnityProject/[Ll]ogs/
+UnityProject/[Uu]ser[Ss]ettings/
+UnityProject/.vs/
+UnityProject/.utmp/
+UnityProject/MemoryCaptures/
+UnityProject/Recordings/
 
-# VS Code
+# Visual Studio / Rider / VS Code
+.vs/
+.idea/
 .vscode/
+*.csproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
 
-# Windows
+# OS files
+.DS_Store
 Thumbs.db
-Desktop.ini
+desktop.ini
 
-# Audio temp files
-*.tmp
+# Logs
+*.log
+
+# C++ build outputs
+build/
+out/
+bin/
+obj/
+.vs/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# C++ temporary files
+*.ilk
+*.pdb
+*.obj
+*.exp
+*.idb
+*.tlog
+*.lastbuildstate
